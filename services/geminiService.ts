@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Modality } from "@google/genai";
 
 /**
@@ -13,8 +12,6 @@ const fileToGenerativePart = async (file: File): Promise<{ mimeType: string; dat
       if (typeof reader.result !== 'string') {
         return reject(new Error("Failed to read file as data URL."));
       }
-      // The result is a data URL: "data:image/jpeg;base64,..."
-      // We need to extract the mimeType and the base64 data.
       const [header, data] = reader.result.split(',');
       const mimeType = header.split(':')[1].split(';')[0];
       if (!data) {
@@ -28,46 +25,55 @@ const fileToGenerativePart = async (file: File): Promise<{ mimeType: string; dat
 };
 
 /**
- * Generates an image by editing an existing one based on a text prompt.
- * @param originalImageFile The original image as a File object.
- * @param prompt The text prompt describing the desired edit.
+ * Generates an image from a text prompt, optionally editing an existing image.
+ * @param prompt The text prompt describing the desired image or edit.
+ * @param originalImageFile The optional original image as a File object to be edited.
  * @returns A promise that resolves to a data URL (string) of the generated image.
  */
-export const generateImage = async (originalImageFile: File, prompt: string): Promise<string> => {
+export const generateImage = async (prompt: string, originalImageFile?: File): Promise<string> => {
   if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set.");
   }
   
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  const { mimeType, data: base64Data } = await fileToGenerativePart(originalImageFile);
+  // The parts array will always contain the text prompt.
+  const parts: ({ text: string } | { inlineData: { mimeType: string; data:string } })[] = [
+    { text: prompt },
+  ];
+
+  // If an original image is provided, convert it and add it to the parts array.
+  if (originalImageFile) {
+    const { mimeType, data: base64Data } = await fileToGenerativePart(originalImageFile);
+    parts.unshift({ // Add image part before the prompt
+      inlineData: {
+        data: base64Data,
+        mimeType: mimeType,
+      },
+    });
+  }
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: {
-      parts: [
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType: mimeType,
-          },
-        },
-        {
-          text: prompt,
-        },
-      ],
+      parts: parts,
     },
     config: {
       responseModalities: [Modality.IMAGE],
     },
   });
 
-  // Extract the generated image data
-  const generatedPart = response.candidates?.[0]?.content?.parts?.[0];
-  if (generatedPart && generatedPart.inlineData) {
-    const { data, mimeType } = generatedPart.inlineData;
-    return `data:${mimeType};base64,${data}`;
+  // Extract the generated image data by iterating through the response parts
+  const responseParts = response.candidates?.[0]?.content?.parts;
+  if (responseParts) {
+    for (const part of responseParts) {
+      if (part.inlineData) {
+        const { data, mimeType } = part.inlineData;
+        return `data:${mimeType};base64,${data}`;
+      }
+    }
   }
-
+  
+  console.error("Invalid response from Gemini API:", response);
   throw new Error("Failed to generate image or response format is invalid.");
 };
