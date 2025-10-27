@@ -3,10 +3,10 @@ import { GoogleGenAI, Modality } from "@google/genai";
 
 /**
  * Converts a File object to a base64 encoded string and its MIME type.
- * @param file The File object to convert.
- * @returns A promise that resolves to an object with mimeType and base64 data.
+ * @param {File} file The File object to convert.
+ * @returns {Promise<{mimeType: string, data: string}>} A promise that resolves to an object with mimeType and base64 data.
  */
-const fileToGenerativePart = async (file: File): Promise<{ mimeType: string; data: string; }> => {
+const fileToGenerativePart = async (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -27,16 +27,16 @@ const fileToGenerativePart = async (file: File): Promise<{ mimeType: string; dat
 
 /**
  * Generates an image from a text prompt, optionally editing an existing image.
- * @param prompt The text prompt describing the desired image or edit.
- * @param originalImageFile The optional original image as a File object to be edited.
- * @returns A promise that resolves to a data URL (string) of the generated image.
+ * @param {string} prompt The text prompt describing the desired image or edit.
+ * @param {File} [originalImageFile] The optional original image as a File object to be edited.
+ * @returns {Promise<string>} A promise that resolves to a data URL (string) of the generated image.
  */
-export const generateImage = async (prompt: string, originalImageFile?: File): Promise<string> => {
+export const generateImage = async (prompt, originalImageFile) => {
   
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // The parts array will always contain the text prompt.
-  const parts: ({ text: string } | { inlineData: { mimeType: string; data:string } })[] = [
+  const parts = [
     { text: prompt },
   ];
 
