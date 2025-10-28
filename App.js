@@ -73,14 +73,6 @@ export default {
     const tempSheetApiKey = ref('');
 
     // --- Methods ---
-    const slugify = (text) => {
-        return text.toString().toLowerCase().trim()
-            .replace(/\s+/g, '-')
-            .replace(/[^\w\-]+/g, '')
-            .replace(/\-\-+/g, '-')
-            .substring(0, 50);
-    };
-
     const decodeJwt = (token) => {
         try {
             const base64Url = token.split('.')[1];
@@ -112,29 +104,30 @@ export default {
         isSidebarOpen.value = false;
     };
     
-    const handleDownload = (url, prompt) => {
+    const handleDownload = (url, row, col) => {
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${slugify(prompt)}.png`;
+        link.download = `img${row}-${col}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     };
 
-    const performGeneration = async (prompt, imageFile) => {
+    const performGeneration = async (promptInfo, imageFile) => {
         isLoading.value = true;
         error.value = null;
         try {
+            const { text: prompt, row, col } = promptInfo;
             const generatedImageUrl = await generateImage(prompt, imageFile);
             const response = await fetch(generatedImageUrl);
             const blob = await response.blob();
-            const newFile = new File([blob], `${slugify(prompt)}.png`, { type: blob.type || 'image/png' });
+            const newFile = new File([blob], `img${row}-${col}.png`, { type: blob.type || 'image/png' });
 
             baseImage.value = { file: newFile, url: generatedImageUrl };
-            generatedImages.value.unshift({ prompt, url: generatedImageUrl });
+            generatedImages.value.unshift({ prompt, url: generatedImageUrl, row, col });
 
             if (isAutoDownload.value) {
-                handleDownload(generatedImageUrl, prompt);
+                handleDownload(generatedImageUrl, row, col);
             }
         } catch (e) {
             error.value = `Generation failed: ${e.message}`;
@@ -194,12 +187,36 @@ export default {
         currentPromptIndex.value = 0;
         try {
             const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetConfig.id}/values/${encodeURIComponent(sheetConfig.name)}!${sheetConfig.range}?key=${sheetApiKey.value}`;
-
             const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}. Check Sheet ID, Name, Range, and API Key.`);
             const data = await response.json();
             if (data.values && data.values.length > 0) {
-                const promptsFromSheet = data.values.flat().filter((p) => typeof p === 'string' && p.trim() !== '');
+                const columnLetterToNumber = (column) => {
+                    let result = 0;
+                    column = column.toUpperCase();
+                    for (let i = 0; i < column.length; i++) {
+                        result = result * 26 + (column.charCodeAt(i) - 65 + 1);
+                    }
+                    return result;
+                };
+
+                const parseStartCell = (range) => {
+                    const startCell = range.split(':')[0];
+                    const colLetters = startCell.match(/[A-Z]+/)?.[0] || 'A';
+                    const rowNumber = parseInt(startCell.match(/\d+/)?.[0] || '1', 10);
+                    return { startCol: columnLetterToNumber(colLetters), startRow: rowNumber };
+                }
+                
+                const { startCol, startRow } = parseStartCell(sheetConfig.range);
+
+                const promptsFromSheet = data.values.flatMap((row, rowIndex) => 
+                    row.map((cell, colIndex) => ({
+                        text: cell,
+                        row: startRow + rowIndex,
+                        col: startCol + colIndex,
+                    })).filter(p => typeof p.text === 'string' && p.text.trim() !== '')
+                );
+
                 if (promptsFromSheet.length === 0) throw new Error("No valid prompts found in the specified range.");
                 sheetPrompts.value = promptsFromSheet;
             } else {
@@ -312,7 +329,7 @@ export default {
     });
 
     watch(isAutoMode, (newValue) => {
-        if (newValue) {
+        if (newValue && sheetPrompts.value.length > 0) {
             timerRef = window.setInterval(() => {
                 if (isLoading.value) return;
                 
@@ -402,7 +419,7 @@ export default {
                 <chevron-left-icon class="w-5 h-5" />
               </button>
               <p class="flex-grow text-center text-sm bg-gray-900/50 border border-gray-600 rounded-lg p-3 h-full min-h-[50px] flex items-center justify-center">
-                {{ sheetPrompts.length > 0 ? sheetPrompts[currentPromptIndex] : 'No prompts loaded.' }}
+                {{ sheetPrompts.length > 0 ? sheetPrompts[currentPromptIndex].text : 'No prompts loaded.' }}
               </p>
               <button
                 @click="handleNextPrompt"
@@ -474,7 +491,7 @@ export default {
                 </div>
                  <div class="absolute top-2 right-2 flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                     <button 
-                        @click="handleDownload(image.url, image.prompt)"
+                        @click="handleDownload(image.url, image.row, image.col)"
                         class="bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-cyan-500 transition-all duration-300"
                         aria-label="Download image"
                         title="Download image"

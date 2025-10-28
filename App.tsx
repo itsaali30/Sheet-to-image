@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { generateImage } from './services/geminiService';
-import type { OriginalImage, GeneratedImage } from './types';
+import type { OriginalImage, GeneratedImage, PromptInfo } from './types';
 
 // --- Helper & Icon Components ---
 
@@ -45,7 +45,7 @@ const KeyIcon: React.FC<{ className?: string }> = ({ className }) => (
 const App: React.FC = () => {
   // --- State ---
   const [baseImage, setBaseImage] = useState<OriginalImage | null>(null);
-  const [sheetPrompts, setSheetPrompts] = useState<string[]>([]);
+  const [sheetPrompts, setSheetPrompts] = useState<PromptInfo[]>([]);
   const [currentPromptIndex, setCurrentPromptIndex] = useState(0);
   const [isFetchingSheet, setIsFetchingSheet] = useState(true);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
@@ -74,37 +74,30 @@ const App: React.FC = () => {
   const [tempSheetApiKey, setTempSheetApiKey] = useState('');
 
   // --- Methods ---
-  const slugify = (text: string) => {
-    return text.toString().toLowerCase().trim()
-      .replace(/\s+/g, '-')
-      .replace(/[^\w\-]+/g, '')
-      .replace(/\-\-+/g, '-')
-      .substring(0, 50);
-  };
-
-  const handleDownload = (url: string, prompt: string) => {
+  const handleDownload = (url: string, row: number, col: number) => {
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${slugify(prompt)}.png`;
+    link.download = `img${row}-${col}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const performGeneration = useCallback(async (prompt: string, imageFile?: File) => {
+  const performGeneration = useCallback(async (promptInfo: PromptInfo, imageFile?: File) => {
     setIsLoading(true);
     setError(null);
     try {
+      const { text: prompt, row, col } = promptInfo;
       const generatedImageUrl = await generateImage(prompt, imageFile);
       const response = await fetch(generatedImageUrl);
       const blob = await response.blob();
-      const newFile = new File([blob], `${slugify(prompt)}.png`, { type: blob.type || 'image/png' });
+      const newFile = new File([blob], `img${row}-${col}.png`, { type: blob.type || 'image/png' });
 
       setBaseImage({ file: newFile, url: generatedImageUrl });
-      setGeneratedImages(prev => [{ prompt, url: generatedImageUrl }, ...prev]);
+      setGeneratedImages(prev => [{ prompt, url: generatedImageUrl, row, col }, ...prev]);
 
       if (isAutoDownload) {
-        handleDownload(generatedImageUrl, prompt);
+        handleDownload(generatedImageUrl, row, col);
       }
     } catch (e: any) {
       setError(`Generation failed: ${e.message}`);
@@ -163,7 +156,32 @@ const App: React.FC = () => {
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}. Check Sheet ID, Name, Range, and API Key.`);
       const data = await response.json();
       if (data.values && data.values.length > 0) {
-        const promptsFromSheet = data.values.flat().filter((p: any) => typeof p === 'string' && p.trim() !== '');
+        const columnLetterToNumber = (column: string) => {
+            let result = 0;
+            column = column.toUpperCase();
+            for (let i = 0; i < column.length; i++) {
+                result = result * 26 + (column.charCodeAt(i) - 65 + 1);
+            }
+            return result;
+        };
+
+        const parseStartCell = (range: string) => {
+            const startCell = range.split(':')[0];
+            const colLetters = startCell.match(/[A-Z]+/)?.[0] || 'A';
+            const rowNumber = parseInt(startCell.match(/\d+/)?.[0] || '1', 10);
+            return { startCol: columnLetterToNumber(colLetters), startRow: rowNumber };
+        }
+        
+        const { startCol, startRow } = parseStartCell(sheetConfig.range);
+
+        const promptsFromSheet: PromptInfo[] = data.values.flatMap((row: any[], rowIndex: number) => 
+            row.map((cell: any, colIndex: number) => ({
+                text: cell,
+                row: startRow + rowIndex,
+                col: startCol + colIndex,
+            })).filter((p: any) => typeof p.text === 'string' && p.text.trim() !== '')
+        );
+
         if (promptsFromSheet.length === 0) throw new Error("No valid prompts found in the specified range.");
         setSheetPrompts(promptsFromSheet);
       } else {
@@ -245,7 +263,7 @@ const App: React.FC = () => {
   }, [fetchPrompts, sheetConfig]);
 
   useEffect(() => {
-    if (isAutoMode) {
+    if (isAutoMode && sheetPrompts.length > 0) {
       timerRef.current = window.setInterval(() => {
         if (isLoading) return;
         setCurrentPromptIndex(prev => {
@@ -309,7 +327,7 @@ const App: React.FC = () => {
                   <ChevronLeftIcon className="w-5 h-5" />
                 </button>
                 <p className="flex-grow text-center text-sm bg-gray-900/50 border border-gray-600 rounded-lg p-3 h-full min-h-[50px] flex items-center justify-center">
-                  {sheetPrompts.length > 0 ? sheetPrompts[currentPromptIndex] : 'No prompts loaded.'}
+                  {sheetPrompts.length > 0 ? sheetPrompts[currentPromptIndex].text : 'No prompts loaded.'}
                 </p>
                 <button onClick={handleNextPrompt} disabled={currentPromptIndex >= sheetPrompts.length - 1 || isLoading || isAutoMode} className="p-3 bg-gray-700 rounded-lg hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors" aria-label="Next prompt">
                   <ChevronRightIcon className="w-5 h-5" />
@@ -370,7 +388,7 @@ const App: React.FC = () => {
                                 <p className="text-center text-sm text-white">{image.prompt}</p>
                             </div>
                             <div className="absolute top-2 right-2 flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <button onClick={() => handleDownload(image.url, image.prompt)} className="bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-cyan-500 transition-all duration-300" aria-label="Download image" title="Download image">
+                                <button onClick={() => handleDownload(image.url, image.row, image.col)} className="bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-cyan-500 transition-all duration-300" aria-label="Download image" title="Download image">
                                     <DownloadIcon className="w-5 h-5"/>
                                 </button>
                             </div>

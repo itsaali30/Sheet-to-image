@@ -7,4 +7,12 @@ export interface OriginalImage {
 export interface GeneratedImage {
   prompt: string;
   url: string;
+  row: number;
+  col: number;
+}
+
+export interface PromptInfo {
+  text: string;
+  row: number;
+  col: number;
 }
