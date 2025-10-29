@@ -28,12 +28,16 @@ const fileToGenerativePart = async (file) => {
 /**
  * Generates an image from a text prompt, optionally editing an existing image.
  * @param {string} prompt The text prompt describing the desired image or edit.
+ * @param {string} apiKey The Gemini API key.
  * @param {File} [originalImageFile] The optional original image as a File object to be edited.
  * @returns {Promise<string>} A promise that resolves to a data URL (string) of the generated image.
  */
-export const generateImage = async (prompt, originalImageFile) => {
+export const generateImage = async (prompt, apiKey, originalImageFile) => {
+  if (!apiKey) {
+    throw new Error("Gemini API key not provided.");
+  }
   
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   // The parts array will always contain the text prompt.
   const parts = [

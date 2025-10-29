@@ -69,6 +69,10 @@ const App: React.FC = () => {
   const [sheetModalError, setSheetModalError] = useState<string | null>(null);
   const googleSignInButtonRef = useRef<HTMLDivElement>(null);
 
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [isGeminiKeyModalOpen, setIsGeminiKeyModalOpen] = useState(false);
+  const [tempGeminiApiKey, setTempGeminiApiKey] = useState('');
+
   const [sheetApiKey, setSheetApiKey] = useState('');
   const [isSheetKeyModalOpen, setIsSheetKeyModalOpen] = useState(false);
   const [tempSheetApiKey, setTempSheetApiKey] = useState('');
@@ -84,11 +88,19 @@ const App: React.FC = () => {
   };
 
   const performGeneration = useCallback(async (promptInfo: PromptInfo, imageFile?: File) => {
+    if (!geminiApiKey) {
+      setError("Gemini API Key is not set. Please set it in the settings sidebar.");
+      setIsLoading(false);
+      if (isAutoMode) {
+        setIsAutoMode(false);
+      }
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
       const { text: prompt, row, col } = promptInfo;
-      const generatedImageUrl = await generateImage(prompt, imageFile);
+      const generatedImageUrl = await generateImage(prompt, geminiApiKey, imageFile);
       const response = await fetch(generatedImageUrl);
       const blob = await response.blob();
       const newFile = new File([blob], `img${row}-${col}.png`, { type: blob.type || 'image/png' });
@@ -107,7 +119,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isAutoDownload, isAutoMode]);
+  }, [isAutoDownload, isAutoMode, geminiApiKey]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -244,9 +256,22 @@ const App: React.FC = () => {
     }
     setIsSheetKeyModalOpen(false);
   };
+  
+  const handleGeminiKeySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (tempGeminiApiKey.trim()) {
+      setGeminiApiKey(tempGeminiApiKey);
+      localStorage.setItem('gemini-api-key', tempGeminiApiKey);
+    }
+    setIsGeminiKeyModalOpen(false);
+  };
 
   // --- Lifecycle & Watchers ---
   useEffect(() => {
+    const storedGeminiKey = localStorage.getItem('gemini-api-key');
+    if (storedGeminiKey) {
+      setGeminiApiKey(storedGeminiKey);
+    }
     const storedKey = localStorage.getItem('sheet-api-key');
     if (storedKey) {
       setSheetApiKey(storedKey);
@@ -447,20 +472,17 @@ const App: React.FC = () => {
               <div className="bg-gray-700/50 p-4 rounded-xl">
                 <h3 className="text-lg font-medium text-center mb-4">API Keys</h3>
                 <div className="space-y-4">
-                    <div className="relative group">
-                        <button 
-                            disabled 
-                            className="w-full flex items-center justify-center p-3 bg-gray-600 rounded-lg font-semibold transition-colors cursor-not-allowed opacity-50"
-                        >
-                            <KeyIcon className="w-5 h-5 mr-2"/>
-                            Set Gemini API Key
-                        </button>
-                        <div className="absolute bottom-full mb-2 w-full px-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                            <div className="bg-gray-900 text-gray-200 text-xs rounded py-2 px-3 shadow-lg text-center">
-                                For security, the Gemini API key is managed via environment variables.
-                            </div>
-                        </div>
-                    </div>
+                    <button 
+                        onClick={() => {
+                            setTempGeminiApiKey(geminiApiKey);
+                            setIsGeminiKeyModalOpen(true);
+                            setIsSidebarOpen(false);
+                        }}
+                        className="w-full flex items-center justify-center p-3 bg-teal-600 hover:bg-teal-700 rounded-lg font-semibold transition-colors"
+                    >
+                        <KeyIcon className="w-5 h-5 mr-2"/>
+                        Set Gemini API Key
+                    </button>
                     <button 
                         onClick={() => {
                             setTempSheetApiKey(sheetApiKey);
@@ -543,6 +565,38 @@ const App: React.FC = () => {
                           />
                       </div>
                       <button type="submit" className="p-3 bg-cyan-500 hover:bg-cyan-600 rounded-lg font-bold text-lg transition-colors disabled:bg-gray-600" disabled={!tempSheetApiKey.trim()}>
+                          Save Key
+                      </button>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {isGeminiKeyModalOpen && (
+          <div className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-md relative">
+                  <button onClick={() => setIsGeminiKeyModalOpen(false)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-700 transition-colors" aria-label="Close API key settings">
+                      <CloseIcon />
+                  </button>
+                  <h2 className="text-2xl font-bold mb-4 text-center">Set Gemini API Key</h2>
+                  <p className="text-gray-400 mb-6 text-center">
+                      Enter your Gemini API key. This key is stored locally in your browser.
+                  </p>
+                  <form onSubmit={handleGeminiKeySubmit} className="flex flex-col space-y-4">
+                      <div>
+                          <label htmlFor="geminiApiKeyInput" className="block text-sm font-medium text-gray-300 mb-1">API Key</label>
+                          <input 
+                              id="geminiApiKeyInput"
+                              type="password"
+                              value={tempGeminiApiKey}
+                              onChange={(e) => setTempGeminiApiKey(e.target.value)}
+                              placeholder="Enter your API key"
+                              className="w-full p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                              aria-label="Gemini API Key"
+                              required
+                          />
+                      </div>
+                      <button type="submit" className="p-3 bg-cyan-500 hover:bg-cyan-600 rounded-lg font-bold text-lg transition-colors disabled:bg-gray-600" disabled={!tempGeminiApiKey.trim()}>
                           Save Key
                       </button>
                   </form>
